@@ -17,28 +17,44 @@ const (
 	Template = "Go"
 )
 
-func getCountFindInURL(url string) (count int, err error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return 0, err
-	}
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return 0, err
-	}
-	return strings.Count(string(body), Template), nil
+type result struct {
+	url   string
+	count int
+	err   error
 }
 
-func sendMsg(urls chan string, done chan string) {
+func getCountFindInURL(url string) result {
+	var res result
+	var resp *http.Response
+	var body []byte
+
+	resp, res.err = http.Get(url)
+	if res.err != nil {
+		return res
+	}
+	body, res.err = ioutil.ReadAll(resp.Body)
+	if res.err != nil {
+		return res
+	}
+
+	if res.err == nil {
+		res = result{
+			url:   url,
+			count: strings.Count(string(body), Template),
+		}
+	}
+	return res
+}
+
+func sendMsg(urls <-chan result, done chan<- string) {
 	var sum int
 	for url := range urls {
-		count, err := getCountFindInURL(url)
-		if err != nil {
-			fmt.Println(err)
+		if url.err != nil {
+			fmt.Println(url.err)
 			return
 		}
-		sum += count
-		fmt.Printf("Count '%v' for %s: %d\n", Template, url, count)
+		sum += url.count
+		fmt.Printf("Count '%v' for %s: %d\n", Template, url.url, url.count)
 	}
 	fmt.Printf("Total: %d\n", sum)
 	done <- "I'm done"
@@ -51,7 +67,7 @@ func main() {
 		return
 	}
 
-	urls := make(chan string)
+	urls := make(chan result)
 	done := make(chan string)
 
 	go sendMsg(urls, done)
@@ -63,8 +79,8 @@ func main() {
 		url := scanner.Text()
 		buffer <- "buffer"
 		wg.Add(1)
-		go func(url string, buffer <-chan string, urls chan<- string, wg *sync.WaitGroup) {
-			urls <- url
+		go func(url string, buffer <-chan string, urls chan<- result, wg *sync.WaitGroup) {
+			urls <- getCountFindInURL(url)
 			<-buffer
 			wg.Done()
 		}(url, buffer, urls, &wg)
